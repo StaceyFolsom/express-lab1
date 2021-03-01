@@ -1,160 +1,144 @@
 const express = require("express");
 const cartItems = express.Router();
+const pool = require("./pg-connection-pool");
 
-const cart = [
-  {
-    id: 1,
-    product: "frame",
-    price: 19.99,
-    quantity: 1
-  },
-  {
-    id: 2,
-    product: "candle",
-    price: 11.99,
-    quantity: 3
-  },
-  {
-    id: 3,
-    product: "blanket",
-    price: 49.99,
-    quantity: 1
-  },
-  {
-    id: 4,
-    product: "book",
-    price: 8.99,
-    quantity: 2
-  },
-  {
-    id: 5,
-    product: "fancy slippers",
-    price: 22,
-    quantity: 2
-  },
-  {
-    id: 6,
-    product: "notebook",
-    price: 12,
-    quantity: 3
-  },
-  {
-    id: 7,
-    product: "pen",
-    price: 2.99,
-    quantity: 10
-  },
-  {
-    id: 8,
-    product: "nail polish",
-    price: 7.99,
-    quantity: 3
-  },
-  {
-    id: 9,
-    product: "mug",
-    price: 7.99,
-    quantity: 2
-  },
-  {
-    id: 10,
-    product: "pillow",
-    price: 24,
-    quantity: 2
-  },
-  {
-    id: 11,
-    product: "hair spray",
-    price: 3.99,
-    quantity: 3
-  },
-  {
-    id: 12,
-    product: "fancy bookmark",
-    price: 9.99,
-    quantity: 4
-  },
-  {
-    id: 13,
-    product: "pencil",
-    price: 1.25,
-    quantity: 2
-  },
-];
+cartItems.get("/cart-items", (req, res) => {
 
-cartItems.get("/", (req, res) => {
+  const maxPrice = req.query.maxPrice;
+  let prefix = req.query.prefix;
+  const pageSize = req.query.pageSize;
 
-    let filteredCart = cart;
-    const maxPrice = req.query.maxPrice;
-    const prefix = req.query.prefix;
-    const pageSize = req.query.pageSize;
+  let query = "SELECT * FROM shopping_cart WHERE 1=1";
+  let vars = [];
 
   if (maxPrice) {
-    filteredCart = filteredCart.filter((item) => {
-      return item.price <= maxPrice;
-    });
-  } 
-  
+    vars.push(maxPrice);
+    query += ` AND price <= $${vars.length}`;
+  }
+
   if (prefix) {
-    filteredCart = filteredCart.filter((item) => {
-      return item.product.toLowerCase().startsWith(prefix.toLowerCase());
-    });
-  } 
+    prefix = (prefix.concat('%')).toLowerCase();
+    vars.push(prefix);
+    query += ` AND product LIKE $${vars.length}`; 
+  }
 
   if (pageSize) {
-    if (filteredCart.length > pageSize) {
-        filteredCart.length = pageSize;
-    }
-  } 
-    res.status(200);
-    res.json(filteredCart);
+    vars.push(pageSize);
+    query += ` LIMIT $${vars.length}`;
   }
-);
 
-cartItems.get("/:id", (req, res) => {
-    const item = cart.find(i => i.id == req.params.id);
-
-    if(!item) {
-        res.status(404).send("ID Not Found");
-    }
-        res.status(200);
-        res.json(item);
+    // console.log(query, vars);
+    pool.query(query, vars).then((results) => {
+    res.json(results.rows);
+    })
 });
 
-cartItems.post("/", (req, res) => {
+cartItems.get("/cart-items/:id", (req, res) => {
+
+    const id = parseInt(req.params.id);
+    pool.query("SELECT * FROM shopping_cart WHERE id = $1", [id]).then((results) => {
+
+    if (results.rowCount > 0) {
+      res.json(results.rows);
+    } else {
+      res.status(404).json('Not found');
+    }
+  });
+
+});
+
+cartItems.post("/cart-items", (req, res) => {
+   
+    const item = req.body;
+    pool.query("INSERT INTO shopping_cart (product, price, quantity) VALUES ($1, $2, $3);", 
+    [
+      item.product,
+      item.price,
+      item.quantity
+    ]).then(() => {
+      res.status(201);
+      res.json(item);
+    })
+});
+
+cartItems.put("/cart-items/:id", (req, res) => {
+
     let item = req.body;
-    item.id = cart.length + 1;
-    cart.push(req.body);
-    res.status(201);
-    res.json(item);
-});
+    let id = req.params.id;
+    
+    pool.query("UPDATE shopping_cart SET product = $1, price = $2, quantity = $3 WHERE id = $4;", [item.product, item.price, item.quantity, id]).then((results) => {
+    res.status(200);
+    res.json(results);
+    })
+  });
 
-cartItems.put("/:id", (req, res) => {
-    const index = cart.findIndex(i => i.id == req.params.id);
-    const selectedItem = cart[index];
+cartItems.delete("/cart-items/:id", (req, res) => {
 
-    if (index >= 0) {
-        const newItem = {};
-        newItem.id = selectedItem.id;
-        newItem.product = req.body.product;
-        newItem.price = req.body.price;
-        newItem.quantity = req.body.quantity;
-        cart.splice(index, 1, newItem);
-        res.status(200);
-        res.json(newItem);
-    }
-        res.status(404).send("ID Not Found"); // added this so Postman would resolve the request
-    });
-
-cartItems.delete("/:id", (req, res) => {
-    const index = cart.findIndex(i => i.id == req.params.id);
-
-    if (index >= 0) {
-        cart.splice(index, 1);
-        res.status(204);
-        res.json(cart[index]);
-    }
-        res.status(404).send("ID Not Found");  // added this so Postman would resolve the request
+    let id = req.params.id;
+    console.log(id);
+    pool.query("DELETE FROM shopping_cart WHERE id = $1;", [id]).then(() => {
+      res.status(204);
+      res.json();
+    })
 });
 
 module.exports = cartItems;
+
+
+
+
+
+// -------------------------------------------------------------------
+
+
+// ALT GET METHOD THAT ONLY MAKES ONE CALL TO THE DATABASE AND THEN QUERIES THE RESULTS (DON'T RECALL IF IT ALL WORKS OR NOT)
+// const express = require("express");
+// const cartItems = express.Router();
+// const pool = require("./pg-connection-pool");
+
+// cartItems.get("/cart-items", (req, res) => {
+
+//   pool.query("SELECT * FROM shopping_cart;").then((results) => {
+
+//     let cart = results.rows.map((result) => {
+//       let newResult = result;
+//       return newResult;
+//     });
+
+//   let filteredCart = cart;
+//   const maxPrice = req.query.maxPrice;
+//   let prefix = req.query.prefix;
+//   const pageSize = req.query.pageSize;
+
+//   if (maxPrice) {
+//     filteredCart = filteredCart.filter((item) => {
+//       if (item.price <= parseInt(maxPrice) ) {
+//       return item;
+//       }
+//     })};
+
+//   if (prefix) {
+//     filteredCart = filteredCart.filter((item) => {
+//       return item.product.toLowerCase().startsWith(prefix.toLowerCase());
+//     })};
+
+//   if (pageSize) {
+//     if (filteredCart.length > pageSize) {
+//     filteredCart.length = pageSize;
+//   }};
+
+//   res.status(200);
+//   res.json(filteredCart);
+//   })
+// });
+
+//     module.exports = cartItems;
+
+// cartItems.get("/cart-items/:id", (req, res) => {
+//   const item = parseInt(req.query.id);
+
+//   pool.query("SELECT * FROM shopping_cart WHERE id = $1", [item]).then((results) => {
+//     console.log(item);
+//     res.json(results.rows);
+//   })
+// });
